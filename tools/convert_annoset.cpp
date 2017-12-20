@@ -93,7 +93,6 @@ int main(int argc, char** argv) {
   const string label_map_file = FLAGS_label_map_file;
   const bool check_label = FLAGS_check_label;
   std::map<std::string, int> name_to_label;
-
   std::ifstream infile(argv[2]);
   std::vector<std::pair<std::string, boost::variant<int, std::string> > > lines;
   std::string filename;
@@ -142,6 +141,7 @@ int main(int argc, char** argv) {
   int data_size = 0;
   bool data_size_initialized = false;
 
+  std::set<string> existedLabel;
   for (int line_id = 0; line_id < lines.size(); ++line_id) {
     bool status = true;
     std::string enc = encode_type;
@@ -163,7 +163,7 @@ int main(int argc, char** argv) {
       labelname = root_folder + boost::get<std::string>(lines[line_id].second);
       status = ReadRichImageToAnnotatedDatum(filename, labelname, resize_height,
           resize_width, min_dim, max_dim, is_color, enc, type, label_type,
-          name_to_label, &anno_datum);
+          name_to_label, &anno_datum, existedLabel);
       anno_datum.set_type(AnnotatedDatum_AnnotationType_BBOX);
     }
     if (status == false) {
@@ -195,6 +195,12 @@ int main(int argc, char** argv) {
       LOG(INFO) << "Processed " << count << " files.";
     }
   }
+  std::set<string>::iterator iter;
+  for(iter = existedLabel.begin(); iter!= existedLabel.end(); ++iter)
+  {
+    LOG(INFO)<<"#####################"<<*iter;
+  }
+  LOG(INFO)<<"#####################sum"<<existedLabel.size();
   // write the last batch
   if (count % 1000 != 0) {
     txn->Commit();

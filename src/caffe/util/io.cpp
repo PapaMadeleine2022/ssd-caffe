@@ -196,7 +196,7 @@ bool ReadRichImageToAnnotatedDatum(const string& filename,
     const int min_dim, const int max_dim, const bool is_color,
     const string& encoding, const AnnotatedDatum_AnnotationType type,
     const string& labeltype, const std::map<string, int>& name_to_label,
-    AnnotatedDatum* anno_datum) {
+    AnnotatedDatum* anno_datum, std::set<string>& existedLabel) {
   // Read image to datum.
   bool status = ReadImageToDatum(filename, -1, height, width,
                                  min_dim, max_dim, is_color, encoding,
@@ -214,7 +214,7 @@ bool ReadRichImageToAnnotatedDatum(const string& filename,
       GetImageSize(filename, &ori_height, &ori_width);
       if (labeltype == "xml") {
         return ReadXMLToAnnotatedDatum(labelfile, ori_height, ori_width,
-                                       name_to_label, anno_datum);
+                                       name_to_label, anno_datum, existedLabel);
       } else if (labeltype == "json") {
         return ReadJSONToAnnotatedDatum(labelfile, ori_height, ori_width,
                                         name_to_label, anno_datum);
@@ -257,10 +257,9 @@ bool ReadFileToDatum(const string& filename, const int label,
 // Parse VOC/ILSVRC detection annotation.
 bool ReadXMLToAnnotatedDatum(const string& labelfile, const int img_height,
     const int img_width, const std::map<string, int>& name_to_label,
-    AnnotatedDatum* anno_datum) {
+    AnnotatedDatum* anno_datum, std::set<string>& existedLabel) {
   ptree pt;
   read_xml(labelfile, pt);
-
   // Parse annotation.
   int width = 0, height = 0;
   try {
@@ -278,6 +277,7 @@ bool ReadXMLToAnnotatedDatum(const string& labelfile, const int img_height,
   CHECK(width != 0 && height != 0) << labelfile <<
       " no valid image width/height.";
   int instance_id = 0;
+  
   BOOST_FOREACH(ptree::value_type &v1, pt.get_child("annotation")) {
     ptree pt1 = v1.second;
     if (v1.first == "object") {
@@ -289,8 +289,10 @@ bool ReadXMLToAnnotatedDatum(const string& labelfile, const int img_height,
         if (v2.first == "name") {
           string name = pt2.data();
           if (name_to_label.find(name) == name_to_label.end()) {
-            LOG(FATAL) << "Unknown name: " << name;
+            break;
+            // LOG(FATAL) << "Unknown name: " << name;
           }
+          existedLabel.insert(name);
           int label = name_to_label.find(name)->second;
           bool found_group = false;
           for (int g = 0; g < anno_datum->annotation_group_size(); ++g) {
@@ -587,30 +589,16 @@ bool ReadLabelFileToLabelMap(const string& filename, bool include_background,
 
 bool MapNameToLabel(const LabelMap& map, const bool strict_check,
     std::map<string, int>* name_to_label) {
-  std::set<int> label_set;
-  label_set.clear();
   // cleanup
   name_to_label->clear();
+
   for (int i = 0; i < map.item_size(); ++i) {
     const string& name = map.item(i).name();
     const int label = map.item(i).label();
-    const string& display_name=map.item(i).display_name();
     if (strict_check) {
-      if (label_set.insert(label).second){
-        if (!name_to_label->insert(std::make_pair(name, label)).second) {
-          LOG(FATAL) << "There are many duplicates of name: " << name;
-          return false;
-        }
-      }
-      // can have duplicates of label
-      else{
-        if (!name_to_label->insert(std::make_pair(name, label)).second) {
-          LOG(FATAL) << "There are many duplicates of name: " << name;
-          return false;
-        }
-        else{
-          (*name_to_label)[display_name]=label;
-        }
+      if (!name_to_label->insert(std::make_pair(name, label)).second) {
+        LOG(FATAL) << "There are many duplicates of name: " << name;
+        return false;
       }
     } else {
       (*name_to_label)[name] = label;
@@ -621,19 +609,18 @@ bool MapNameToLabel(const LabelMap& map, const bool strict_check,
 
 bool MapLabelToName(const LabelMap& map, const bool strict_check,
     std::map<int, string>* label_to_name) {
-  std::set<int> label_set;
   // cleanup
   label_to_name->clear();
+
   for (int i = 0; i < map.item_size(); ++i) {
     const string& name = map.item(i).name();
     const int label = map.item(i).label();
-    const string& display_name=map.item(i).display_name();
     if (strict_check) {
-      // can have duplicates of label
       if (!label_to_name->insert(std::make_pair(label, name)).second) {
-        (*label_to_name)[label] = display_name;
+        LOG(FATAL) << "There are many duplicates of label: " << label;
+        return false;
       }
-    }  else {
+    } else {
       (*label_to_name)[label] = name;
     }
   }
@@ -649,10 +636,10 @@ bool MapLabelToDisplayName(const LabelMap& map, const bool strict_check,
     const string& display_name = map.item(i).display_name();
     const int label = map.item(i).label();
     if (strict_check) {
-      // can have duplicates of label
       if (!label_to_display_name->insert(
               std::make_pair(label, display_name)).second) {
-        (*label_to_display_name)[label] = display_name;
+        LOG(FATAL) << "There are many duplicates of label: " << label;
+        return false;
       }
     } else {
       (*label_to_display_name)[label] = display_name;
