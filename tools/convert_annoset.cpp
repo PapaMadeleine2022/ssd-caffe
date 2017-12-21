@@ -22,6 +22,7 @@
 
 #include "boost/scoped_ptr.hpp"
 #include "boost/variant.hpp"
+#include "boost/algorithm/string.hpp"
 #include "gflags/gflags.h"
 #include "glog/logging.h"
 
@@ -141,7 +142,9 @@ int main(int argc, char** argv) {
   int data_size = 0;
   bool data_size_initialized = false;
 
-  std::set<string> existedLabel;
+  std::set<std::string> existedLabels;
+  std::set<std::string> existedObjectLabels;
+  std::set<std::string> objectLables;
   for (int line_id = 0; line_id < lines.size(); ++line_id) {
     bool status = true;
     std::string enc = encode_type;
@@ -161,9 +164,15 @@ int main(int argc, char** argv) {
           min_dim, max_dim, is_color, enc, datum);
     } else if (anno_type == "detection") {
       labelname = root_folder + boost::get<std::string>(lines[line_id].second);
+      std::vector<std::string> strs_argv;
+      boost::split(strs_argv, argv[4], boost::is_any_of(","));
+      std::cout << "* size of the strs_argv: " << strs_argv.size() << std::endl;
+      for (size_t i = 0; i < strs_argv.size(); i++){
+        objectLables.insert(strs_argv[i]);
+      }
       status = ReadRichImageToAnnotatedDatum(filename, labelname, resize_height,
           resize_width, min_dim, max_dim, is_color, enc, type, label_type,
-          name_to_label, &anno_datum, existedLabel);
+          name_to_label, &anno_datum, existedLabels, existedObjectLabels, objectLables);
       anno_datum.set_type(AnnotatedDatum_AnnotationType_BBOX);
     }
     if (status == false) {
@@ -195,12 +204,40 @@ int main(int argc, char** argv) {
       LOG(INFO) << "Processed " << count << " files.";
     }
   }
-  std::set<string>::iterator iter;
-  for(iter = existedLabel.begin(); iter!= existedLabel.end(); ++iter)
+
+
+  std::set<std::string>::iterator iter;
+  std::set<std::string> noExistedObjectLabels;
+  for(iter = existedObjectLabels.begin(); iter!= existedObjectLabels.end(); ++iter)
   {
-    LOG(INFO)<<"#####################"<<*iter;
+    LOG(INFO)<<"#####################existedObjectLabels:"<<*iter;
+    if(objectLables.find(*iter) == objectLables.end()){
+      noExistedObjectLabels.insert(*iter);
+    }
   }
-  LOG(INFO)<<"#####################sum"<<existedLabel.size();
+  LOG(INFO)<<"#####################existedObjectLabels.size():"<<existedObjectLabels.size();
+  for(iter = noExistedObjectLabels.begin(); iter!= noExistedObjectLabels.end(); ++iter)
+  {
+    LOG(INFO)<<"#####################noExistedObjectLabels:"<<*iter;
+  }
+  LOG(INFO)<<"#####################noExistedObjectLabels.size():"<<noExistedObjectLabels.size();
+
+  std::set<std::string> noExistedLabels;
+  for(iter = existedLabels.begin(); iter!= existedLabels.end(); ++iter)
+  {
+    LOG(INFO)<<"#####################existedLabels:"<<*iter;
+    if(name_to_label.find(*iter) == name_to_label.end()){
+      noExistedLabels.insert(*iter);
+    }
+  }
+  LOG(INFO)<<"#####################existedLabels.size():"<<existedLabels.size();
+
+  for(iter = noExistedLabels.begin(); iter!= noExistedLabels.end(); ++iter)
+  {
+    LOG(INFO)<<"#####################noExistedLabels:"<<*iter;
+  }
+  LOG(INFO)<<"#####################noExistedLabels.size():"<<noExistedLabels.size();
+
   // write the last batch
   if (count % 1000 != 0) {
     txn->Commit();
