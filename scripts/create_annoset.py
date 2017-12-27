@@ -4,9 +4,9 @@ import shutil
 import subprocess
 import sys
 
+# insert path to import ssd/python/caffe
 current_path=os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(current_path)+'/python')
-
 from caffe.proto import caffe_pb2
 from google.protobuf import text_format
 
@@ -20,6 +20,8 @@ if __name__ == "__main__":
       help="The output directory which stores the database file.")
   parser.add_argument("exampledir",
       help="The directory to store the link of the database files.")
+  parser.add_argument("objectLabels", nargs='+',
+      help="The array to store the object labels that you set.")
   parser.add_argument("--redo", default = False, action = "store_true",
       help="Recreate the database.")
   parser.add_argument("--anno-type", default = "classification",
@@ -56,6 +58,13 @@ if __name__ == "__main__":
   list_file = args.listfile
   out_dir = args.outdir
   example_dir = args.exampledir
+  objectLabels = args.objectLabels
+  str_objectLabels=''
+  for index, item in enumerate(objectLabels):
+    if index != len(objectLabels)-1:
+      str_objectLabels+=item+','
+    else:
+      str_objectLabels+=item
 
   redo = args.redo
   anno_type = args.anno_type
@@ -137,10 +146,10 @@ if __name__ == "__main__":
         " --encode_type={}" \
         " --encoded={}" \
         " --gray={}" \
-        " {} {} {}" \
+        " {} {} {} {}" \
         .format(caffe_root, anno_type, label_type, label_map_file, check_label,
             min_dim, max_dim, resize_height, resize_width, backend, shuffle,
-            check_size, encode_type, encoded, gray, root_dir, list_file, out_dir)
+            check_size, encode_type, encoded, gray, root_dir, list_file, out_dir, str_objectLabels)
   elif anno_type == "classification":
     cmd = "{}/build/tools/convert_annoset" \
         " --anno_type={}" \

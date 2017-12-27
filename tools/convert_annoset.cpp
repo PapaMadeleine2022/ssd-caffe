@@ -210,33 +210,33 @@ int main(int argc, char** argv) {
   std::set<std::string> noExistedObjectLabels;
   for(iter = existedObjectLabels.begin(); iter!= existedObjectLabels.end(); ++iter)
   {
-    LOG(INFO)<<"#####################existedObjectLabels:"<<*iter;
+    // LOG(INFO)<<"#####################existedObjectLabels:"<<*iter;
     if(objectLables.find(*iter) == objectLables.end()){
       noExistedObjectLabels.insert(*iter);
     }
   }
-  LOG(INFO)<<"#####################existedObjectLabels.size():"<<existedObjectLabels.size();
-  for(iter = noExistedObjectLabels.begin(); iter!= noExistedObjectLabels.end(); ++iter)
-  {
-    LOG(INFO)<<"#####################noExistedObjectLabels:"<<*iter;
-  }
-  LOG(INFO)<<"#####################noExistedObjectLabels.size():"<<noExistedObjectLabels.size();
+  // LOG(INFO)<<"#####################existedObjectLabels.size():"<<existedObjectLabels.size();
+  // for(iter = noExistedObjectLabels.begin(); iter!= noExistedObjectLabels.end(); ++iter)
+  // {
+  //   LOG(INFO)<<"#####################noExistedObjectLabels:"<<*iter;
+  // }
+  // LOG(INFO)<<"#####################noExistedObjectLabels.size():"<<noExistedObjectLabels.size();
 
   std::set<std::string> noExistedLabels;
   for(iter = existedLabels.begin(); iter!= existedLabels.end(); ++iter)
   {
-    LOG(INFO)<<"#####################existedLabels:"<<*iter;
+    // LOG(INFO)<<"#####################existedLabels:"<<*iter;
     if(name_to_label.find(*iter) == name_to_label.end()){
       noExistedLabels.insert(*iter);
     }
   }
-  LOG(INFO)<<"#####################existedLabels.size():"<<existedLabels.size();
+  // LOG(INFO)<<"#####################existedLabels.size():"<<existedLabels.size();
 
-  for(iter = noExistedLabels.begin(); iter!= noExistedLabels.end(); ++iter)
-  {
-    LOG(INFO)<<"#####################noExistedLabels:"<<*iter;
-  }
-  LOG(INFO)<<"#####################noExistedLabels.size():"<<noExistedLabels.size();
+  // for(iter = noExistedLabels.begin(); iter!= noExistedLabels.end(); ++iter)
+  // {
+  //   LOG(INFO)<<"#####################noExistedLabels:"<<*iter;
+  // }
+  // LOG(INFO)<<"#####################noExistedLabels.size():"<<noExistedLabels.size();
 
   // write the last batch
   if (count % 1000 != 0) {
