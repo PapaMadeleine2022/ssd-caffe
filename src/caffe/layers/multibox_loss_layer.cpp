@@ -77,6 +77,7 @@ void MultiBoxLossLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
     loc_loss_layer_->SetUp(loc_bottom_vec_, loc_top_vec_);
   } else if (loc_loss_type_ == MultiBoxLossParameter_LocLossType_SMOOTH_L1) {
     LayerParameter layer_param;
+    LOG(INFO)<<"#################this->layer_param_.name():"<<this->layer_param_.name();
     layer_param.set_name(this->layer_param_.name() + "_smooth_L1_loc");
     layer_param.set_type("SmoothL1Loss");
     layer_param.add_loss_weight(loc_weight_);
@@ -149,17 +150,28 @@ void MultiBoxLossLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
   const Dtype* conf_data = bottom[1]->cpu_data();
   const Dtype* prior_data = bottom[2]->cpu_data();
   const Dtype* gt_data = bottom[3]->cpu_data();
-
-  // Retrieve all ground truth.
+  LOG(INFO)<<"@@@@@@@@@@@@@@@@@@bottom[3]->num():"<<bottom[3]->num();
+  LOG(INFO)<<"@@@@@@@@@@@@@@@@@@bottom[3]->channels():"<<bottom[3]->channels();
+  LOG(INFO)<<"@@@@@@@@@@@@@@@@@@bottom[3]->height():"<<bottom[3]->height();
+  LOG(INFO)<<"@@@@@@@@@@@@@@@@@@bottom[3]->width():"<<bottom[3]->width();
+  // Retrieve all ground truth.conf_data
   map<int, vector<NormalizedBBox> > all_gt_bboxes;
-  GetGroundTruth(gt_data, num_gt_, background_label_id_, use_difficult_gt_,
-                 &all_gt_bboxes);
+  map<int, vector<NormalizedBBox> > all_ignore_bboxes;
+  GetGroundTruth_includeIgnore(gt_data, num_gt_, background_label_id_, use_difficult_gt_,
+                 &all_gt_bboxes, &all_ignore_bboxes);
+  LOG(INFO)<<"@@@@@@@@@@@@@@@@@@all_gt_bboxes.size():"<<all_gt_bboxes.size();
+  LOG(INFO)<<"@@@@@@@@@@@@@@@@@@all_ignore_bboxes.size():"<<all_ignore_bboxes.size();
 
   // Retrieve all prior bboxes. It is same within a batch since we assume all
   // images in a batch are of same dimension.
   vector<NormalizedBBox> prior_bboxes;
   vector<vector<float> > prior_variances;
   GetPriorBBoxes(prior_data, num_priors_, &prior_bboxes, &prior_variances);
+
+  vector<LabelBBox> all_prior_bboxes_considerIgnore;
+  GetAllPriorBBoxes_considerIgnore(num_, prior_bboxes, all_prior_bboxes_considerIgnore, all_ignore_bboxes);
+  LOG(INFO)<<"@@@@@@@@@@@@@@@@@@all_prior_bboxes_considerIgnore.size():"<<all_prior_bboxes_considerIgnore.size();
+  LOG(INFO)<<"@@@@@@@@@@@@@@@@@@(*all_prior_bboxes_considerIgnore.begin()).begin()->second.size():"<< (*all_prior_bboxes_considerIgnore.begin()).begin()->second.size();
 
   // Retrieve all predictions.
   vector<LabelBBox> all_loc_preds;
@@ -168,17 +180,27 @@ void MultiBoxLossLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
 
   // Find matches between source bboxes and ground truth bboxes.
   vector<map<int, vector<float> > > all_match_overlaps;
-  FindMatches(all_loc_preds, all_gt_bboxes, prior_bboxes, prior_variances,
-              multibox_loss_param_, &all_match_overlaps, &all_match_indices_);
+  // FindMatches(all_loc_preds, all_gt_bboxes, prior_bboxes, prior_variances,
+  //             multibox_loss_param_, &all_match_overlaps, &all_match_indices_);
+  FindMatches_considerIgnore(all_loc_preds, all_gt_bboxes, all_prior_bboxes_considerIgnore, prior_variances,
+            multibox_loss_param_, &all_match_overlaps, &all_match_indices_);
+
+  LOG(INFO)<<"@@@@@@@@@@@@@@@@@@all_match_indices_.size():"<<all_match_indices_.size();
+  LOG(INFO)<<"@@@@@@@@@@@@@@@@@@all_match_indices_[0].size():"<<all_match_indices_[0].size();
 
   num_matches_ = 0;
   int num_negs = 0;
   // Sample hard negative (and positive) examples based on mining type.
-  MineHardExamples(*bottom[1], all_loc_preds, all_gt_bboxes, prior_bboxes,
+  // MineHardExamples(*bottom[1], all_loc_preds, all_gt_bboxes, prior_bboxes,
+  //                  prior_variances, all_match_overlaps, multibox_loss_param_,
+  //                  &num_matches_, &num_negs, &all_match_indices_,
+  //                  &all_neg_indices_);
+  MineHardExamples_considerIgnore(*bottom[1], all_loc_preds, all_gt_bboxes, all_prior_bboxes_considerIgnore,
                    prior_variances, all_match_overlaps, multibox_loss_param_,
                    &num_matches_, &num_negs, &all_match_indices_,
                    &all_neg_indices_);
-
+  LOG(INFO)<<"@@@@@@@@@@@@@@@@@@num_negs:"<<num_negs;
+  LOG(INFO)<<"@@@@@@@@@@@@@@@@@@num_matches_:"<<num_matches_;
   if (num_matches_ >= 1) {
     // Form data to pass on to loc_loss_layer_.
     vector<int> loc_shape(2);
@@ -188,8 +210,11 @@ void MultiBoxLossLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
     loc_gt_.Reshape(loc_shape);
     Dtype* loc_pred_data = loc_pred_.mutable_cpu_data();
     Dtype* loc_gt_data = loc_gt_.mutable_cpu_data();
-    EncodeLocPrediction(all_loc_preds, all_gt_bboxes, all_match_indices_,
-                        prior_bboxes, prior_variances, multibox_loss_param_,
+    // EncodeLocPrediction(all_loc_preds, all_gt_bboxes, all_match_indices_,
+    //                     prior_bboxes, prior_variances, multibox_loss_param_,
+    //                     loc_pred_data, loc_gt_data);
+    EncodeLocPrediction_considerIgnore(all_loc_preds, all_gt_bboxes, all_match_indices_,
+                        all_prior_bboxes_considerIgnore, prior_variances, multibox_loss_param_,
                         loc_pred_data, loc_gt_data);
     loc_loss_layer_->Reshape(loc_bottom_vec_, loc_top_vec_);
     loc_loss_layer_->Forward(loc_bottom_vec_, loc_top_vec_);

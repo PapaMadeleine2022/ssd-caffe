@@ -618,6 +618,7 @@ void MatchBBox(const vector<NormalizedBBox>& gt_bboxes,
   for (int i = 0; i < num_pred; ++i) {
     if (ignore_cross_boundary_bbox && IsCrossBoundaryBBox(pred_bboxes[i])) {
       (*match_indices)[i] = -2;
+      LOG(INFO)<<"###############if (ignore_cross_boundary_bbox && IsCrossBoundaryBBox(pred_bboxes[i])) ";
       continue;
     }
     for (int j = 0; j < num_gt; ++j) {
@@ -629,7 +630,7 @@ void MatchBBox(const vector<NormalizedBBox>& gt_bboxes,
     }
   }
 
-  // Bipartite matching.
+  //Bipartite matching.
   vector<int> gt_pool;
   for (int i = 0; i < num_gt; ++i) {
     gt_pool.push_back(i);
@@ -719,6 +720,150 @@ void MatchBBox(const vector<NormalizedBBox>& gt_bboxes,
   return;
 }
 
+void MatchBBox_considerIgnore(const vector<NormalizedBBox>& gt_bboxes,
+    const vector<NormalizedBBox>& prior_bboxes_considerIgnore, const int label,
+    const MatchType match_type, const float overlap_threshold,
+    const bool ignore_cross_boundary_bbox,
+    vector<int>* match_indices, vector<float>* match_overlaps) {
+  LOG(INFO)<<"###############prior_bboxes_considerIgnore.size():"<<prior_bboxes_considerIgnore.size();
+  int num_pred = prior_bboxes_considerIgnore.size();
+  match_indices->clear();
+  match_indices->resize(num_pred, -1);
+  match_overlaps->clear();
+  match_overlaps->resize(num_pred, 0.);
+
+  int num_gt = 0;
+  vector<int> gt_indices;
+  if (label == -1) {
+    // label -1 means comparing against all ground truth.
+    num_gt = gt_bboxes.size();
+    for (int i = 0; i < num_gt; ++i) {
+      gt_indices.push_back(i);
+    }
+  } else {
+    // Count number of ground truth boxes which has the desired label.
+    for (int i = 0; i < gt_bboxes.size(); ++i) {
+      if (gt_bboxes[i].label() == label) {
+        num_gt++;
+        gt_indices.push_back(i);
+      }
+    }
+  }
+  if (num_gt == 0) {
+    return;
+  }
+
+  // Store the positive overlap between predictions and ground truth.
+  LOG(INFO)<<"###############// Store the positive overlap between predictions and ground truth.";
+  map<int, map<int, float> > overlaps;
+  for (int i = 0; i < num_pred; ++i) {
+    if(prior_bboxes_considerIgnore[i].label()!=-1){
+      if (ignore_cross_boundary_bbox && IsCrossBoundaryBBox(prior_bboxes_considerIgnore[i])) {
+        (*match_indices)[i] = -2;
+        continue;
+      }
+
+      for (int j = 0; j < num_gt; ++j) {
+        float overlap = JaccardOverlap(prior_bboxes_considerIgnore[i], gt_bboxes[gt_indices[j]]);
+        if (overlap > 1e-6) {
+          (*match_overlaps)[i] = std::max((*match_overlaps)[i], overlap);
+          overlaps[i][j] = overlap;
+        }
+      }
+    }
+  }
+
+  // Bipartite matching.
+  LOG(INFO)<<"###############// Bipartite matching.";
+  vector<int> gt_pool;
+  for (int i = 0; i < num_gt; ++i) {
+    gt_pool.push_back(i);
+  }
+  while (gt_pool.size() > 0) {
+    // Find the most overlapped gt and cooresponding predictions.
+    int max_idx = -1;
+    int max_gt_idx = -1;
+    float max_overlap = -1;
+    for (map<int, map<int, float> >::iterator it = overlaps.begin();
+         it != overlaps.end(); ++it) {
+      int i = it->first;
+      if ((*match_indices)[i] != -1) {
+        // The prediction already has matched ground truth or is ignored.
+        continue;
+      }
+      for (int p = 0; p < gt_pool.size(); ++p) {
+        int j = gt_pool[p];
+        if (it->second.find(j) == it->second.end()) {
+          // No overlap between the i-th prediction and j-th ground truth.
+          continue;
+        }
+        // Find the maximum overlapped pair.
+        if (it->second[j] > max_overlap) {
+          // If the prediction has not been matched to any ground truth,
+          // and the overlap is larger than maximum overlap, update.
+          max_idx = i;
+          max_gt_idx = j;
+          max_overlap = it->second[j];
+        }
+      }
+    }
+    if (max_idx == -1) {
+      // Cannot find good match.
+      break;
+    } else {
+      CHECK_EQ((*match_indices)[max_idx], -1);
+      (*match_indices)[max_idx] = gt_indices[max_gt_idx];
+      (*match_overlaps)[max_idx] = max_overlap;
+      // Erase the ground truth.
+      gt_pool.erase(std::find(gt_pool.begin(), gt_pool.end(), max_gt_idx));
+    }
+  }
+  LOG(INFO)<<"###############switch (match_type) {";
+  switch (match_type) {
+    case MultiBoxLossParameter_MatchType_BIPARTITE:
+      // Already done.
+      break;
+    case MultiBoxLossParameter_MatchType_PER_PREDICTION:
+      // Get most overlaped for the rest prediction bboxes.
+      for (map<int, map<int, float> >::iterator it = overlaps.begin();
+           it != overlaps.end(); ++it) {
+        int i = it->first;
+        if ((*match_indices)[i] != -1) {
+          // The prediction already has matched ground truth or is ignored.
+          continue;
+        }
+        int max_gt_idx = -1;
+        float max_overlap = -1;
+        for (int j = 0; j < num_gt; ++j) {
+          if (it->second.find(j) == it->second.end()) {
+            // No overlap between the i-th prediction and j-th ground truth.
+            continue;
+          }
+          // Find the maximum overlapped pair.
+          float overlap = it->second[j];
+          if (overlap >= overlap_threshold && overlap > max_overlap) {
+            // If the prediction has not been matched to any ground truth,
+            // and the overlap is larger than maximum overlap, update.
+            max_gt_idx = j;
+            max_overlap = overlap;
+          }
+        }
+        if (max_gt_idx != -1) {
+          // Found a matched ground truth.
+          CHECK_EQ((*match_indices)[i], -1);
+          (*match_indices)[i] = gt_indices[max_gt_idx];
+          (*match_overlaps)[i] = max_overlap;
+          LOG(INFO)<<"###############max_overlap:"<<max_overlap;
+        }
+      }
+      break;
+    default:
+      LOG(FATAL) << "Unknown matching type.";
+      break;
+  }
+  return;
+}
+
 void FindMatches(const vector<LabelBBox>& all_loc_preds,
       const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
       const vector<NormalizedBBox>& prior_bboxes,
@@ -781,6 +926,109 @@ void FindMatches(const vector<LabelBBox>& all_loc_preds,
       vector<float> temp_match_overlaps;
       const int label = -1;
       MatchBBox(gt_bboxes, prior_bboxes, label, match_type, overlap_threshold,
+                ignore_cross_boundary_bbox, &temp_match_indices,
+                &temp_match_overlaps);
+      if (share_location) {
+        match_indices[label] = temp_match_indices;
+        match_overlaps[label] = temp_match_overlaps;
+      } else {
+        // Get ground truth label for each ground truth bbox.
+        vector<int> gt_labels;
+        for (int g = 0; g < gt_bboxes.size(); ++g) {
+          gt_labels.push_back(gt_bboxes[g].label());
+        }
+        // Distribute the matching results to different loc_class.
+        for (int c = 0; c < loc_classes; ++c) {
+          if (c == background_label_id) {
+            // Ignore background loc predictions.
+            continue;
+          }
+          match_indices[c].resize(temp_match_indices.size(), -1);
+          match_overlaps[c] = temp_match_overlaps;
+          for (int m = 0; m < temp_match_indices.size(); ++m) {
+            if (temp_match_indices[m] > -1) {
+              const int gt_idx = temp_match_indices[m];
+              CHECK_LT(gt_idx, gt_labels.size());
+              if (c == gt_labels[gt_idx]) {
+                match_indices[c][m] = gt_idx;
+              }
+            }
+          }
+        }
+      }
+    }
+    all_match_indices->push_back(match_indices);
+    all_match_overlaps->push_back(match_overlaps);
+  }
+}
+
+void FindMatches_considerIgnore(const vector<LabelBBox>& all_loc_preds,
+      const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
+      const vector<LabelBBox>& all_prior_bboxes_considerIgnore,
+      const vector<vector<float> >& prior_variances,
+      const MultiBoxLossParameter& multibox_loss_param,
+      vector<map<int, vector<float> > >* all_match_overlaps,
+      vector<map<int, vector<int> > >* all_match_indices) {
+  // all_match_overlaps->clear();
+  // all_match_indices->clear();
+  // Get parameters.
+  CHECK(multibox_loss_param.has_num_classes()) << "Must provide num_classes.";
+  const int num_classes = multibox_loss_param.num_classes();
+  CHECK_GE(num_classes, 1) << "num_classes should not be less than 1.";
+  const bool share_location = multibox_loss_param.share_location();
+  const int loc_classes = share_location ? 1 : num_classes;
+  const MatchType match_type = multibox_loss_param.match_type();
+  const float overlap_threshold = multibox_loss_param.overlap_threshold();
+  const bool use_prior_for_matching =
+      multibox_loss_param.use_prior_for_matching();
+  const int background_label_id = multibox_loss_param.background_label_id();
+  const CodeType code_type = multibox_loss_param.code_type();
+  const bool encode_variance_in_target =
+      multibox_loss_param.encode_variance_in_target();
+  const bool ignore_cross_boundary_bbox =
+      multibox_loss_param.ignore_cross_boundary_bbox();
+  // Find the matches.
+  int num = all_loc_preds.size();
+  for (int i = 0; i < num; ++i) {
+    map<int, vector<int> > match_indices;
+    map<int, vector<float> > match_overlaps;
+
+    // Check if there is ground truth for current image.
+    if (all_gt_bboxes.find(i) == all_gt_bboxes.end()) {
+      // There is no gt for current image. All predictions are negative.
+      all_match_indices->push_back(match_indices);
+      all_match_overlaps->push_back(match_overlaps);
+      continue;
+    }
+    const vector<NormalizedBBox>& prior_bboxes_considerIgnore=all_prior_bboxes_considerIgnore[i].find(-1)->second;
+    // Find match between predictions and ground truth.
+    const vector<NormalizedBBox>& gt_bboxes = all_gt_bboxes.find(i)->second;
+    if (!use_prior_for_matching) {
+      for (int c = 0; c < loc_classes; ++c) {
+        int label = share_location ? -1 : c;
+        if (!share_location && label == background_label_id) {
+          // Ignore background loc predictions.
+          continue;
+        }
+        // Decode the prediction into bbox first.
+        vector<NormalizedBBox> loc_bboxes;
+        bool clip_bbox = false;
+        DecodeBBoxes(prior_bboxes_considerIgnore, prior_variances,
+                     code_type, encode_variance_in_target, clip_bbox,
+                     all_loc_preds[i].find(label)->second, &loc_bboxes);
+        MatchBBox(gt_bboxes, loc_bboxes, label, match_type,
+                  overlap_threshold, ignore_cross_boundary_bbox,
+                  &match_indices[label], &match_overlaps[label]);
+      }
+    } else {
+      // Use prior bboxes to match against all ground truth.
+      vector<int> temp_match_indices;
+      vector<float> temp_match_overlaps;
+      const int label = -1;
+      // MatchBBox(gt_bboxes, prior_bboxes, label, match_type, overlap_threshold,
+      //           ignore_cross_boundary_bbox, &temp_match_indices,
+      //           &temp_match_overlaps);
+      MatchBBox_considerIgnore(gt_bboxes, prior_bboxes_considerIgnore, label, match_type, overlap_threshold,
                 ignore_cross_boundary_bbox, &temp_match_indices,
                 &temp_match_overlaps);
       if (share_location) {
@@ -1052,6 +1300,237 @@ template void MineHardExamples(const Blob<double>& conf_blob,
     vector<vector<int> >* all_neg_indices);
 
 template <typename Dtype>
+void MineHardExamples_considerIgnore(const Blob<Dtype>& conf_blob,
+    const vector<LabelBBox>& all_loc_preds,
+    const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
+    const vector<LabelBBox>& all_prior_bboxes_considerIgnore,
+    const vector<vector<float> >& prior_variances,
+    const vector<map<int, vector<float> > >& all_match_overlaps,
+    const MultiBoxLossParameter& multibox_loss_param,
+    int* num_matches, int* num_negs,
+    vector<map<int, vector<int> > >* all_match_indices,
+    vector<vector<int> >* all_neg_indices) {
+  int num = all_loc_preds.size();
+  // CHECK_EQ(num, all_match_overlaps.size());
+  // CHECK_EQ(num, all_match_indices->size());
+  // all_neg_indices->clear();
+  *num_matches = CountNumMatches(*all_match_indices, num);
+  *num_negs = 0;
+  // int num_priors = prior_bboxes.size();
+  if(all_prior_bboxes_considerIgnore.size()==0){
+    LOG(FATAL)<<"all_prior_bboxes are empty!";
+  }
+  int num_priors = (*all_prior_bboxes_considerIgnore.begin()).begin()->second.size();
+  CHECK_EQ(num_priors, prior_variances.size());
+  // Get parameters.
+  CHECK(multibox_loss_param.has_num_classes()) << "Must provide num_classes.";
+  const int num_classes = multibox_loss_param.num_classes();
+  CHECK_GE(num_classes, 1) << "num_classes should not be less than 1.";
+  const int background_label_id = multibox_loss_param.background_label_id();
+  const bool use_prior_for_nms = multibox_loss_param.use_prior_for_nms();
+  const ConfLossType conf_loss_type = multibox_loss_param.conf_loss_type();
+  const MiningType mining_type = multibox_loss_param.mining_type();
+  if (mining_type == MultiBoxLossParameter_MiningType_NONE) {
+    return;
+  }
+  const LocLossType loc_loss_type = multibox_loss_param.loc_loss_type();
+  const float neg_pos_ratio = multibox_loss_param.neg_pos_ratio();
+  const float neg_overlap = multibox_loss_param.neg_overlap();
+  const CodeType code_type = multibox_loss_param.code_type();
+  const bool encode_variance_in_target =
+      multibox_loss_param.encode_variance_in_target();
+  const bool has_nms_param = multibox_loss_param.has_nms_param();
+  float nms_threshold = 0;
+  int top_k = -1;
+  if (has_nms_param) {
+    nms_threshold = multibox_loss_param.nms_param().nms_threshold();
+    top_k = multibox_loss_param.nms_param().top_k();
+  }
+  const int sample_size = multibox_loss_param.sample_size();
+  // Compute confidence losses based on matching results.
+  vector<vector<float> > all_conf_loss;
+#ifdef CPU_ONLY
+  // ComputeConfLoss(conf_blob.cpu_data(), num, num_priors, num_classes,
+  //     background_label_id, conf_loss_type, *all_match_indices, all_gt_bboxes,
+  //     &all_conf_loss);
+  LOG(INFO)<<"@@@@@@@@@@@@@@@#ifdef CPU_ONLY";
+  ComputeConfLoss_considerIgnore(conf_blob.cpu_data(), num, num_priors, num_classes,
+      background_label_id, conf_loss_type, *all_match_indices, all_gt_bboxes, all_prior_bboxes_considerIgnore,
+      &all_conf_loss);
+#else
+  // ComputeConfLossGPU(conf_blob, num, num_priors, num_classes,
+  //     background_label_id, conf_loss_type, *all_match_indices, all_gt_bboxes,
+  //     &all_conf_loss);
+  LOG(INFO)<<"@@@@@@@@@@@@@@@#ifdef GPU";
+  ComputeConfLossGPU_considerIgnore(conf_blob, num, num_priors, num_classes,
+      background_label_id, conf_loss_type, *all_match_indices, all_gt_bboxes, all_prior_bboxes_considerIgnore,
+      &all_conf_loss);
+#endif
+
+  vector<vector<float> > all_loc_loss;
+  if (mining_type == MultiBoxLossParameter_MiningType_HARD_EXAMPLE) {
+    // Compute localization losses based on matching results.
+    Blob<Dtype> loc_pred, loc_gt;
+    if (*num_matches != 0) {
+      vector<int> loc_shape(2, 1);
+      loc_shape[1] = *num_matches * 4;
+      loc_pred.Reshape(loc_shape);
+      loc_gt.Reshape(loc_shape);
+      Dtype* loc_pred_data = loc_pred.mutable_cpu_data();
+      Dtype* loc_gt_data = loc_gt.mutable_cpu_data();
+      // EncodeLocPrediction(all_loc_preds, all_gt_bboxes, *all_match_indices,
+      //                     prior_bboxes, prior_variances, multibox_loss_param,
+      //                     loc_pred_data, loc_gt_data);
+      EncodeLocPrediction_considerIgnore(all_loc_preds, all_gt_bboxes, *all_match_indices,
+                          all_prior_bboxes_considerIgnore, prior_variances, multibox_loss_param,
+                          loc_pred_data, loc_gt_data);
+    }
+    ComputeLocLoss(loc_pred, loc_gt, *all_match_indices, num,
+                   num_priors, loc_loss_type, &all_loc_loss);
+  } else {
+    // No localization loss.
+    for (int i = 0; i < num; ++i) {
+      vector<float> loc_loss(num_priors, 0.f);
+      all_loc_loss.push_back(loc_loss);
+    }
+  }
+  for (int i = 0; i < num; ++i) {
+    map<int, vector<int> >& match_indices = (*all_match_indices)[i];
+    const map<int, vector<float> >& match_overlaps = all_match_overlaps[i];
+    const vector<NormalizedBBox>& prior_bboxes_considerIgnore=all_prior_bboxes_considerIgnore[i].find(-1)->second;
+    // loc + conf loss.
+    const vector<float>& conf_loss = all_conf_loss[i];
+    const vector<float>& loc_loss = all_loc_loss[i];
+    vector<float> loss;
+    std::transform(conf_loss.begin(), conf_loss.end(), loc_loss.begin(),
+                   std::back_inserter(loss), std::plus<float>());
+    // Pick negatives or hard examples based on loss.
+    set<int> sel_indices;
+    vector<int> neg_indices;
+    for (map<int, vector<int> >::iterator it = match_indices.begin();
+         it != match_indices.end(); ++it) {
+      const int label = it->first;
+      LOG(INFO)<<"############## match_indices[label].size()"<< match_indices[label].size();
+      int num_sel = 0;
+      // Get potential indices and loss pairs.
+      vector<pair<float, int> > loss_indices;
+      for (int m = 0; m < match_indices[label].size(); ++m) {
+        if(prior_bboxes_considerIgnore[m].label()==-1){
+          continue;
+        }
+        if (IsEligibleMining(mining_type, match_indices[label][m],
+            match_overlaps.find(label)->second[m], neg_overlap)) {
+          loss_indices.push_back(std::make_pair(loss[m], m));
+          ++num_sel;
+        }
+      }
+      if (mining_type == MultiBoxLossParameter_MiningType_MAX_NEGATIVE) {
+        int num_pos = 0;
+        for (int m = 0; m < match_indices[label].size(); ++m) {
+          if (match_indices[label][m] > -1) {
+            ++num_pos;
+          }
+        }
+        LOG(INFO)<<"@@@@@@@@@@@@@@@@@@num_sel:"<<num_sel;
+        LOG(INFO)<<"@@@@@@@@@@@@@@@@@@num_pos:"<<num_pos;
+        num_sel = std::min(static_cast<int>(num_pos * neg_pos_ratio), num_sel);
+      } else if (mining_type == MultiBoxLossParameter_MiningType_HARD_EXAMPLE) {
+        CHECK_GT(sample_size, 0);
+        num_sel = std::min(sample_size, num_sel);
+      }
+      // Select samples.
+      if (has_nms_param && nms_threshold > 0) {
+
+        // Do nms before selecting samples.
+        vector<float> sel_loss;
+        vector<NormalizedBBox> sel_bboxes;
+        if (use_prior_for_nms) {
+          for (int m = 0; m < match_indices[label].size(); ++m) {
+            if (IsEligibleMining(mining_type, match_indices[label][m],
+                match_overlaps.find(label)->second[m], neg_overlap)) {
+              sel_loss.push_back(loss[m]);
+              sel_bboxes.push_back(prior_bboxes_considerIgnore[m]);
+            }
+          }
+        } else {
+          // Decode the prediction into bbox first.
+          vector<NormalizedBBox> loc_bboxes;
+          bool clip_bbox = false;
+          DecodeBBoxes(prior_bboxes_considerIgnore, prior_variances,
+                       code_type, encode_variance_in_target, clip_bbox,
+                       all_loc_preds[i].find(label)->second, &loc_bboxes);
+          for (int m = 0; m < match_indices[label].size(); ++m) {
+            if (IsEligibleMining(mining_type, match_indices[label][m],
+                match_overlaps.find(label)->second[m], neg_overlap)) {
+              sel_loss.push_back(loss[m]);
+              sel_bboxes.push_back(loc_bboxes[m]);
+            }
+          }
+        }
+        // Do non-maximum suppression based on the loss.
+        vector<int> nms_indices;
+        ApplyNMS(sel_bboxes, sel_loss, nms_threshold, top_k, &nms_indices);
+        if (nms_indices.size() < num_sel) {
+          LOG(INFO) << "not enough sample after nms: " << nms_indices.size();
+        }
+        // Pick top example indices after nms.
+        num_sel = std::min(static_cast<int>(nms_indices.size()), num_sel);
+        for (int n = 0; n < num_sel; ++n) {
+          sel_indices.insert(loss_indices[nms_indices[n]].second);
+        }
+      } else {
+        // Pick top example indices based on loss.
+        std::sort(loss_indices.begin(), loss_indices.end(),
+                  SortScorePairDescend<int>);
+        for (int n = 0; n < num_sel; ++n) {
+          sel_indices.insert(loss_indices[n].second);
+        }
+      }
+
+      // Update the match_indices and select neg_indices.
+      for (int m = 0; m < match_indices[label].size(); ++m) {
+        if (match_indices[label][m] > -1) {
+          if (mining_type == MultiBoxLossParameter_MiningType_HARD_EXAMPLE &&
+              sel_indices.find(m) == sel_indices.end()) {
+            match_indices[label][m] = -1;
+            *num_matches -= 1;
+          }
+        } else if (match_indices[label][m] == -1) {
+          if (sel_indices.find(m) != sel_indices.end()) {
+            neg_indices.push_back(m);
+            *num_negs += 1;
+          }
+        }
+      }
+    }
+    LOG(INFO)<<"@@@@@@@@@@@@@@@@@@sel_indices.size():"<<sel_indices.size();
+    LOG(INFO)<<"@@@@@@@@@@@@@@@@@@neg_indices.size():"<<neg_indices.size();
+    all_neg_indices->push_back(neg_indices);
+  }
+}
+
+template void MineHardExamples_considerIgnore(const Blob<float>& conf_blob,
+    const vector<LabelBBox>& all_loc_preds,
+    const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
+    const vector<LabelBBox>& all_prior_bboxes_considerIgnore,
+    const vector<vector<float> >& prior_variances,
+    const vector<map<int, vector<float> > >& all_match_overlaps,
+    const MultiBoxLossParameter& multibox_loss_param,
+    int* num_matches, int* num_negs,
+    vector<map<int, vector<int> > >* all_match_indices,
+    vector<vector<int> >* all_neg_indices);
+template void MineHardExamples_considerIgnore(const Blob<double>& conf_blob,
+    const vector<LabelBBox>& all_loc_preds,
+    const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
+    const vector<LabelBBox>& all_prior_bboxes_considerIgnore,
+    const vector<vector<float> >& prior_variances,
+    const vector<map<int, vector<float> > >& all_match_overlaps,
+    const MultiBoxLossParameter& multibox_loss_param,
+    int* num_matches, int* num_negs,
+    vector<map<int, vector<int> > >* all_match_indices,
+    vector<vector<int> >* all_neg_indices);
+
+template <typename Dtype>
 void GetGroundTruth(const Dtype* gt_data, const int num_gt,
       const int background_label_id, const bool use_difficult_gt,
       map<int, vector<NormalizedBBox> >* all_gt_bboxes) {
@@ -1059,10 +1538,12 @@ void GetGroundTruth(const Dtype* gt_data, const int num_gt,
   for (int i = 0; i < num_gt; ++i) {
     int start_idx = i * 8;
     int item_id = gt_data[start_idx];
+    LOG(INFO)<<"@@@@@@@@@@@@@@@@@@gt_data[start_idx]:"<<gt_data[start_idx];
     if (item_id == -1) {
       continue;
     }
     int label = gt_data[start_idx + 1];
+
     CHECK_NE(background_label_id, label)
         << "Found background label in the dataset.";
     bool difficult = static_cast<bool>(gt_data[start_idx + 7]);
@@ -1082,6 +1563,44 @@ void GetGroundTruth(const Dtype* gt_data, const int num_gt,
     (*all_gt_bboxes)[item_id].push_back(bbox);
   }
 }
+template <typename Dtype>
+void GetGroundTruth_includeIgnore(const Dtype* gt_data, const int num_gt,
+      const int background_label_id, const bool use_difficult_gt,
+      map<int, vector<NormalizedBBox> >* all_gt_bboxes, map<int, vector<NormalizedBBox> >* all_ignore_bboxes) {
+  all_gt_bboxes->clear();
+  all_ignore_bboxes->clear();
+  for (int i = 0; i < num_gt; ++i) {
+    int start_idx = i * 8;
+    int item_id = gt_data[start_idx];
+    if (item_id == -1) {
+      continue;
+    }
+    int label = gt_data[start_idx + 1];
+
+    CHECK_NE(background_label_id, label)
+        << "Found background label in the dataset.";
+    bool difficult = static_cast<bool>(gt_data[start_idx + 7]);
+    if (!use_difficult_gt && difficult) {
+      // Skip reading difficult ground truth.
+      continue;
+    }
+    NormalizedBBox bbox;
+    bbox.set_label(label);
+    bbox.set_xmin(gt_data[start_idx + 3]);
+    bbox.set_ymin(gt_data[start_idx + 4]);
+    bbox.set_xmax(gt_data[start_idx + 5]);
+    bbox.set_ymax(gt_data[start_idx + 6]);
+    bbox.set_difficult(difficult);
+    float bbox_size = BBoxSize(bbox);
+    bbox.set_size(bbox_size);
+    if(label != -1){
+      (*all_gt_bboxes)[item_id].push_back(bbox);
+    }
+    else{
+      (*all_ignore_bboxes)[item_id].push_back(bbox);
+    }
+  }
+}
 
 // Explicit initialization.
 template void GetGroundTruth(const float* gt_data, const int num_gt,
@@ -1090,6 +1609,12 @@ template void GetGroundTruth(const float* gt_data, const int num_gt,
 template void GetGroundTruth(const double* gt_data, const int num_gt,
       const int background_label_id, const bool use_difficult_gt,
       map<int, vector<NormalizedBBox> >* all_gt_bboxes);
+template void GetGroundTruth_includeIgnore(const float* gt_data, const int num_gt,
+            const int background_label_id, const bool use_difficult_gt,
+            map<int, vector<NormalizedBBox> >* all_gt_bboxes, map<int, vector<NormalizedBBox> >* all_ignore_bboxes);
+template void GetGroundTruth_includeIgnore(const double* gt_data, const int num_gt,
+            const int background_label_id, const bool use_difficult_gt,
+            map<int, vector<NormalizedBBox> >* all_gt_bboxes, map<int, vector<NormalizedBBox> >* all_ignore_bboxes);
 
 template <typename Dtype>
 void GetGroundTruth(const Dtype* gt_data, const int num_gt,
@@ -1145,13 +1670,18 @@ void GetLocPredictions(const Dtype* loc_data, const int num,
       int start_idx = p * num_loc_classes * 4;
       for (int c = 0; c < num_loc_classes; ++c) {
         int label = share_location ? -1 : c;
+        // LOG(INFO)<<"##############################label:"<<label;
         if (label_bbox.find(label) == label_bbox.end()) {
           label_bbox[label].resize(num_preds_per_class);
         }
         label_bbox[label][p].set_xmin(loc_data[start_idx + c * 4]);
+        // LOG(INFO)<<"##############################label_bbox[label][p].xmin():"<<label_bbox[label][p].xmin();
         label_bbox[label][p].set_ymin(loc_data[start_idx + c * 4 + 1]);
+        // LOG(INFO)<<"##############################label_bbox[label][p].ymin():"<<label_bbox[label][p].ymin();
         label_bbox[label][p].set_xmax(loc_data[start_idx + c * 4 + 2]);
+        // LOG(INFO)<<"##############################label_bbox[label][p].xmax():"<<label_bbox[label][p].xmax();
         label_bbox[label][p].set_ymax(loc_data[start_idx + c * 4 + 3]);
+        // LOG(INFO)<<"##############################label_bbox[label][p].ymax():"<<label_bbox[label][p].ymax();
       }
     }
     loc_data += num_preds_per_class * num_loc_classes * 4;
@@ -1188,6 +1718,7 @@ void EncodeLocPrediction(const vector<LabelBBox>& all_loc_preds,
     for (map<int, vector<int> >::const_iterator
          it = all_match_indices[i].begin();
          it != all_match_indices[i].end(); ++it) {
+      LOG(INFO)<<"###########all_match_indices[i].size()"<<all_match_indices[i].size();
       const int label = it->first;
       const vector<int>& match_index = it->second;
       CHECK(all_loc_preds[i].find(label) != all_loc_preds[i].end());
@@ -1265,6 +1796,111 @@ template void EncodeLocPrediction(const vector<LabelBBox>& all_loc_preds,
       const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
       const vector<map<int, vector<int> > >& all_match_indices,
       const vector<NormalizedBBox>& prior_bboxes,
+      const vector<vector<float> >& prior_variances,
+      const MultiBoxLossParameter& multibox_loss_param,
+      double* loc_pred_data, double* loc_gt_data);
+
+template <typename Dtype>
+void EncodeLocPrediction_considerIgnore(const vector<LabelBBox>& all_loc_preds,
+      const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
+      const vector<map<int, vector<int> > >& all_match_indices,
+      const vector<LabelBBox>& all_prior_bboxes_considerIgnore,
+      const vector<vector<float> >& prior_variances,
+      const MultiBoxLossParameter& multibox_loss_param,
+      Dtype* loc_pred_data, Dtype* loc_gt_data) {
+  int num = all_loc_preds.size();
+  // CHECK_EQ(num, all_match_indices.size());
+  // Get parameters.
+  const CodeType code_type = multibox_loss_param.code_type();
+  const bool encode_variance_in_target =
+      multibox_loss_param.encode_variance_in_target();
+  const bool bp_inside = multibox_loss_param.bp_inside();
+  const bool use_prior_for_matching =
+      multibox_loss_param.use_prior_for_matching();
+  int count = 0;
+  for (int i = 0; i < num; ++i) {
+    const vector<NormalizedBBox>& prior_bboxes_considerIgnore=all_prior_bboxes_considerIgnore[i].find(-1)->second;
+    for (map<int, vector<int> >::const_iterator
+         it = all_match_indices[i].begin();
+         it != all_match_indices[i].end(); ++it) {
+      LOG(INFO)<<"###########all_match_indices[i].size()"<<all_match_indices[i].size();
+      const int label = it->first;
+      const vector<int>& match_index = it->second;
+      CHECK(all_loc_preds[i].find(label) != all_loc_preds[i].end());
+      const vector<NormalizedBBox>& loc_pred =
+          all_loc_preds[i].find(label)->second;
+      for (int j = 0; j < match_index.size(); ++j) {
+        if (match_index[j] <= -1) {
+          continue;
+        }
+        // Store encoded ground truth.
+        const int gt_idx = match_index[j];
+        CHECK(all_gt_bboxes.find(i) != all_gt_bboxes.end());
+        CHECK_LT(gt_idx, all_gt_bboxes.find(i)->second.size());
+        const NormalizedBBox& gt_bbox = all_gt_bboxes.find(i)->second[gt_idx];
+        NormalizedBBox gt_encode;
+        CHECK_LT(j, prior_bboxes_considerIgnore.size());
+        EncodeBBox(prior_bboxes_considerIgnore[j], prior_variances[j], code_type,
+                   encode_variance_in_target, gt_bbox, &gt_encode);
+        loc_gt_data[count * 4] = gt_encode.xmin();
+        loc_gt_data[count * 4 + 1] = gt_encode.ymin();
+        loc_gt_data[count * 4 + 2] = gt_encode.xmax();
+        loc_gt_data[count * 4 + 3] = gt_encode.ymax();
+        // Store location prediction.
+        CHECK_LT(j, loc_pred.size());
+        if (bp_inside) {
+          NormalizedBBox match_bbox = prior_bboxes_considerIgnore[j];
+          if (!use_prior_for_matching) {
+            const bool clip_bbox = false;
+            DecodeBBox(prior_bboxes_considerIgnore[j], prior_variances[j], code_type,
+                       encode_variance_in_target, clip_bbox, loc_pred[j],
+                       &match_bbox);
+          }
+          // When a dimension of match_bbox is outside of image region, use
+          // gt_encode to simulate zero gradient.
+          loc_pred_data[count * 4] =
+              (match_bbox.xmin() < 0 || match_bbox.xmin() > 1) ?
+              gt_encode.xmin() : loc_pred[j].xmin();
+          loc_pred_data[count * 4 + 1] =
+              (match_bbox.ymin() < 0 || match_bbox.ymin() > 1) ?
+              gt_encode.ymin() : loc_pred[j].ymin();
+          loc_pred_data[count * 4 + 2] =
+              (match_bbox.xmax() < 0 || match_bbox.xmax() > 1) ?
+              gt_encode.xmax() : loc_pred[j].xmax();
+          loc_pred_data[count * 4 + 3] =
+              (match_bbox.ymax() < 0 || match_bbox.ymax() > 1) ?
+              gt_encode.ymax() : loc_pred[j].ymax();
+        } else {
+          loc_pred_data[count * 4] = loc_pred[j].xmin();
+          loc_pred_data[count * 4 + 1] = loc_pred[j].ymin();
+          loc_pred_data[count * 4 + 2] = loc_pred[j].xmax();
+          loc_pred_data[count * 4 + 3] = loc_pred[j].ymax();
+        }
+        if (encode_variance_in_target) {
+          for (int k = 0; k < 4; ++k) {
+            CHECK_GT(prior_variances[j][k], 0);
+            loc_pred_data[count * 4 + k] /= prior_variances[j][k];
+            loc_gt_data[count * 4 + k] /= prior_variances[j][k];
+          }
+        }
+        ++count;
+      }
+    }
+  }
+}
+
+// Explicit initialization.
+template void EncodeLocPrediction_considerIgnore(const vector<LabelBBox>& all_loc_preds,
+      const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
+      const vector<map<int, vector<int> > >& all_match_indices,
+      const vector<LabelBBox>& all_prior_bboxes_considerIgnore,
+      const vector<vector<float> >& prior_variances,
+      const MultiBoxLossParameter& multibox_loss_param,
+      float* loc_pred_data, float* loc_gt_data);
+template void EncodeLocPrediction_considerIgnore(const vector<LabelBBox>& all_loc_preds,
+      const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
+      const vector<map<int, vector<int> > >& all_match_indices,
+      const vector<LabelBBox>& all_prior_bboxes_considerIgnore,
       const vector<vector<float> >& prior_variances,
       const MultiBoxLossParameter& multibox_loss_param,
       double* loc_pred_data, double* loc_gt_data);
@@ -1537,6 +2173,99 @@ template void ComputeConfLoss(const double* conf_data, const int num,
       vector<vector<float> >* all_conf_loss);
 
 template <typename Dtype>
+void ComputeConfLoss_considerIgnore(const Dtype* conf_data, const int num,
+      const int num_preds_per_class, const int num_classes,
+      const int background_label_id, const ConfLossType loss_type,
+      const vector<map<int, vector<int> > >& all_match_indices,
+      const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
+      const vector<LabelBBox>& all_prior_bboxes_considerIgnore,
+      vector<vector<float> >* all_conf_loss) {
+  CHECK_LT(background_label_id, num_classes);
+  // CHECK_EQ(num, all_match_indices.size());
+  all_conf_loss->clear();
+  for (int i = 0; i < num; ++i) {
+    vector<float> conf_loss;
+    const map<int, vector<int> >& match_indices = all_match_indices[i];
+    const vector<NormalizedBBox>& prior_bboxes_considerIgnore=all_prior_bboxes_considerIgnore[i].find(-1)->second;
+    for (int p = 0; p < num_preds_per_class; ++p) {
+      if(prior_bboxes_considerIgnore[p].label()==-1){
+        continue;
+      }
+      int start_idx = p * num_classes;
+      // Get the label index.
+      int label = background_label_id;
+      for (map<int, vector<int> >::const_iterator it =
+           match_indices.begin(); it != match_indices.end(); ++it) {
+        const vector<int>& match_index = it->second;
+        CHECK_EQ(match_index.size(), num_preds_per_class);
+        if (match_index[p] > -1) {
+          CHECK(all_gt_bboxes.find(i) != all_gt_bboxes.end());
+          const vector<NormalizedBBox>& gt_bboxes =
+              all_gt_bboxes.find(i)->second;
+          CHECK_LT(match_index[p], gt_bboxes.size());
+          label = gt_bboxes[match_index[p]].label();
+          CHECK_GE(label, 0);
+          CHECK_NE(label, background_label_id);
+          CHECK_LT(label, num_classes);
+          // A prior can only be matched to one gt bbox.
+          break;
+        }
+      }
+      Dtype loss = 0;
+      if (loss_type == MultiBoxLossParameter_ConfLossType_SOFTMAX) {
+        CHECK_GE(label, 0);
+        CHECK_LT(label, num_classes);
+        // Compute softmax probability.
+        // We need to subtract the max to avoid numerical issues.
+        Dtype maxval = conf_data[start_idx];
+        for (int c = 1; c < num_classes; ++c) {
+          maxval = std::max<Dtype>(conf_data[start_idx + c], maxval);
+        }
+        Dtype sum = 0.;
+        for (int c = 0; c < num_classes; ++c) {
+          sum += std::exp(conf_data[start_idx + c] - maxval);
+        }
+        Dtype prob = std::exp(conf_data[start_idx + label] - maxval) / sum;
+        loss = -log(std::max(prob, Dtype(FLT_MIN)));
+      } else if (loss_type == MultiBoxLossParameter_ConfLossType_LOGISTIC) {
+        int target = 0;
+        for (int c = 0; c < num_classes; ++c) {
+          if (c == label) {
+            target = 1;
+          } else {
+            target = 0;
+          }
+          Dtype input = conf_data[start_idx + c];
+          loss -= input * (target - (input >= 0)) -
+              log(1 + exp(input - 2 * input * (input >= 0)));
+        }
+      } else {
+        LOG(FATAL) << "Unknown conf loss type.";
+      }
+      conf_loss.push_back(loss);
+    }
+    conf_data += num_preds_per_class * num_classes;
+    all_conf_loss->push_back(conf_loss);
+  }
+}
+
+// Explicit initialization.
+template void ComputeConfLoss_considerIgnore(const float* conf_data, const int num,
+      const int num_preds_per_class, const int num_classes,
+      const int background_label_id, const ConfLossType loss_type,
+      const vector<map<int, vector<int> > >& all_match_indices,
+      const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
+      const vector<LabelBBox>& all_prior_bboxes_considerIgnore,
+      vector<vector<float> >* all_conf_loss);
+template void ComputeConfLoss_considerIgnore(const double* conf_data, const int num,
+      const int num_preds_per_class, const int num_classes,
+      const int background_label_id, const ConfLossType loss_type,
+      const vector<map<int, vector<int> > >& all_match_indices,
+      const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
+      const vector<LabelBBox>& all_prior_bboxes_considerIgnore,
+      vector<vector<float> >* all_conf_loss);
+
+template <typename Dtype>
 void EncodeConfPrediction(const Dtype* conf_data, const int num,
       const int num_priors, const MultiBoxLossParameter& multibox_loss_param,
       const vector<map<int, vector<int> > >& all_match_indices,
@@ -1686,6 +2415,44 @@ template void GetPriorBBoxes(const float* prior_data, const int num_priors,
 template void GetPriorBBoxes(const double* prior_data, const int num_priors,
       vector<NormalizedBBox>* prior_bboxes,
       vector<vector<float> >* prior_variances);
+
+// remove the prior bboxs which have overlap with ignore bboxs more than threshod
+void GetAllPriorBBoxes_considerIgnore(const int& num, const vector<NormalizedBBox>& prior_bboxes,
+                    vector<LabelBBox>& all_prior_bboxes_considerIgnore,
+                    const map<int, vector<NormalizedBBox> >& all_ignore_bboxes){
+
+  // Store the positive overlap between predictions and ground truth.
+  all_prior_bboxes_considerIgnore.clear();
+  int num_ignore=0;
+  int num_priors=prior_bboxes.size();
+  int label=-1;
+  map<int, vector<NormalizedBBox> > temp_m;
+  int count=0;
+  for(int item_id=0; item_id<num; ++item_id){
+    map<int, vector<NormalizedBBox> > temp_m;
+    vector<NormalizedBBox> prior_bboxes_considerIgnore= prior_bboxes;
+    if (all_ignore_bboxes.find(item_id)!=all_ignore_bboxes.end()){
+      const vector<NormalizedBBox>& ignore_bboxes = all_ignore_bboxes.find(item_id)->second;
+      num_ignore=ignore_bboxes.size();
+
+      LOG(INFO)<<"@@@@@@@@@@@@@@ignore_bboxes.size():"<<ignore_bboxes.size();
+      for (int i = 0; i < num_priors; ++i) {
+        if(prior_bboxes_considerIgnore[i].label()==-1){
+          continue;
+        }
+        for (int j = 0; j < num_ignore; ++j) {
+          float overlap = JaccardOverlap(prior_bboxes_considerIgnore[i], ignore_bboxes[j]);
+          if (overlap > 0.7) {
+            prior_bboxes_considerIgnore[i].set_label(-1);
+          }
+        }
+      }
+    }
+    count++;
+    temp_m.insert(make_pair(label, prior_bboxes_considerIgnore));
+    all_prior_bboxes_considerIgnore.push_back(temp_m);
+  }
+}
 
 template <typename Dtype>
 void GetDetectionResults(const Dtype* det_data, const int num_det,
