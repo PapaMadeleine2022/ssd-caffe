@@ -65,6 +65,7 @@ if __name__ == "__main__":
       str_objectLabels+=item+','
     else:
       str_objectLabels+=item
+  print('##################objectLabels:', str_objectLabels)
 
   redo = args.redo
   anno_type = args.anno_type

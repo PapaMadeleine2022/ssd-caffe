@@ -192,24 +192,24 @@ bool ReadRichImageToAnnotatedDatum(const string& filename,
     const int min_dim, const int max_dim, const bool is_color,
     const std::string& encoding, const AnnotatedDatum_AnnotationType type,
     const string& labeltype, const std::map<string, int>& name_to_label,
-    AnnotatedDatum* anno_datum, std::set<std::string>& existedLabels,
-    std::set<std::string>& existedObjectLabels, const std::set<std::string>& objectLables);
+    AnnotatedDatum* anno_datum, std::set<std::string>& existingLabels,
+    std::set<std::string>& existingObjectLabels, const std::set<std::string>& objectLables);
 
 inline bool ReadRichImageToAnnotatedDatum(const string& filename,
     const string& labelname, const int height, const int width,
     const bool is_color, const std::string & encoding,
     const AnnotatedDatum_AnnotationType type, const string& labeltype,
-    const std::map<string, int>& name_to_label, AnnotatedDatum* anno_datum, 
-    std::set<std::string>& existedLabels, std::set<std::string>& existedObjectLabels, const std::set<std::string>& objectLables) {
+    const std::map<string, int>& name_to_label, AnnotatedDatum* anno_datum,
+    std::set<std::string>& existingLabels, std::set<std::string>& existingObjectLabels, const std::set<std::string>& objectLables) {
   return ReadRichImageToAnnotatedDatum(filename, labelname, height, width, 0, 0,
                       is_color, encoding, type, labeltype, name_to_label,
-                      anno_datum, existedLabels, existedObjectLabels, objectLables);
+                      anno_datum, existingLabels, existingObjectLabels, objectLables);
 }
 
 bool ReadXMLToAnnotatedDatum(const string& labelname, const int img_height,
     const int img_width, const std::map<string, int>& name_to_label,
-    AnnotatedDatum* anno_datum, std::set<std::string>& existedLabels, 
-    std::set<std::string>& existedObjectLabels, const std::set<std::string>& objectLables);
+    AnnotatedDatum* anno_datum, std::set<std::string>& existingLabels,
+    std::set<std::string>& existingObjectLabels, const std::set<std::string>& objectLables);
 
 bool ReadJSONToAnnotatedDatum(const string& labelname, const int img_height,
     const int img_width, const std::map<string, int>& name_to_label,

@@ -196,8 +196,8 @@ bool ReadRichImageToAnnotatedDatum(const string& filename,
     const int min_dim, const int max_dim, const bool is_color,
     const string& encoding, const AnnotatedDatum_AnnotationType type,
     const string& labeltype, const std::map<string, int>& name_to_label,
-    AnnotatedDatum* anno_datum, std::set<std::string>& existedLabels, 
-    std::set<std::string>& existedObjectLabels, const std::set<std::string>& objectLables) {
+    AnnotatedDatum* anno_datum, std::set<std::string>& existingLabels,
+    std::set<std::string>& existingObjectLabels, const std::set<std::string>& objectLables) {
   // Read image to datum.
   bool status = ReadImageToDatum(filename, -1, height, width,
                                  min_dim, max_dim, is_color, encoding,
@@ -215,7 +215,7 @@ bool ReadRichImageToAnnotatedDatum(const string& filename,
       GetImageSize(filename, &ori_height, &ori_width);
       if (labeltype == "xml") {
         return ReadXMLToAnnotatedDatum(labelfile, ori_height, ori_width,
-                                       name_to_label, anno_datum, existedLabels, existedObjectLabels, objectLables);
+                                       name_to_label, anno_datum, existingLabels, existingObjectLabels, objectLables);
       } else if (labeltype == "json") {
         return ReadJSONToAnnotatedDatum(labelfile, ori_height, ori_width,
                                         name_to_label, anno_datum);
@@ -258,8 +258,8 @@ bool ReadFileToDatum(const string& filename, const int label,
 // Parse VOC/ILSVRC detection annotation.
 bool ReadXMLToAnnotatedDatum(const string& labelfile, const int img_height,
     const int img_width, const std::map<string, int>& name_to_label,
-    AnnotatedDatum* anno_datum, std::set<std::string>& existedLabels, 
-    std::set<std::string>& existedObjectLabels, const std::set<std::string>& objectLables) {
+    AnnotatedDatum* anno_datum, std::set<std::string>& existingLabels,
+    std::set<std::string>& existingObjectLabels, const std::set<std::string>& objectLables) {
   ptree pt;
   read_xml(labelfile, pt);
   // Parse annotation.
@@ -279,7 +279,7 @@ bool ReadXMLToAnnotatedDatum(const string& labelfile, const int img_height,
   CHECK(width != 0 && height != 0) << labelfile <<
       " no valid image width/height.";
   int instance_id = 0;
-  
+
   BOOST_FOREACH(ptree::value_type &v1, pt.get_child("annotation")) {
     ptree pt1 = v1.second;
     if (v1.first == "object") {
@@ -294,7 +294,7 @@ bool ReadXMLToAnnotatedDatum(const string& labelfile, const int img_height,
             break;
             // LOG(FATAL) << "Unknown name: " << name;
           }
-          existedLabels.insert(name);
+          existingLabels.insert(name);
           int label = name_to_label.find(name)->second;
           bool found_group = false;
           for (int g = 0; g < anno_datum->annotation_group_size(); ++g) {
@@ -319,7 +319,7 @@ bool ReadXMLToAnnotatedDatum(const string& labelfile, const int img_height,
               label = objectLables.size()+1;
             }
             else{
-              existedObjectLabels.insert(name);
+              existingObjectLabels.insert(name);
             }
             anno_group->set_group_label(label);
             anno = anno_group->add_annotation();

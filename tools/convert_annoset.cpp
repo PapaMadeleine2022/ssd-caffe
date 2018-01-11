@@ -142,8 +142,8 @@ int main(int argc, char** argv) {
   int data_size = 0;
   bool data_size_initialized = false;
 
-  std::set<std::string> existedLabels;
-  std::set<std::string> existedObjectLabels;
+  std::set<std::string> existingLabels;
+  std::set<std::string> existingObjectLabels;
   std::set<std::string> objectLables;
   for (int line_id = 0; line_id < lines.size(); ++line_id) {
     bool status = true;
@@ -172,7 +172,7 @@ int main(int argc, char** argv) {
       }
       status = ReadRichImageToAnnotatedDatum(filename, labelname, resize_height,
           resize_width, min_dim, max_dim, is_color, enc, type, label_type,
-          name_to_label, &anno_datum, existedLabels, existedObjectLabels, objectLables);
+          name_to_label, &anno_datum, existingLabels, existingObjectLabels, objectLables);
       anno_datum.set_type(AnnotatedDatum_AnnotationType_BBOX);
     }
     if (status == false) {
@@ -205,38 +205,39 @@ int main(int argc, char** argv) {
     }
   }
 
-
+  // noExistingObjectLabels is the no　existing label of dataset for labelmap.prototxt
   std::set<std::string>::iterator iter;
-  std::set<std::string> noExistedObjectLabels;
-  for(iter = existedObjectLabels.begin(); iter!= existedObjectLabels.end(); ++iter)
+  std::set<std::string> noExistingObjectLabels;
+  for(iter = existingObjectLabels.begin(); iter!= existingObjectLabels.end(); ++iter)
   {
-    // LOG(INFO)<<"#####################existedObjectLabels:"<<*iter;
+    LOG(INFO)<<"#####################existingObjectLabels:"<<*iter;
     if(objectLables.find(*iter) == objectLables.end()){
-      noExistedObjectLabels.insert(*iter);
+      noExistingObjectLabels.insert(*iter);
     }
   }
-  // LOG(INFO)<<"#####################existedObjectLabels.size():"<<existedObjectLabels.size();
-  // for(iter = noExistedObjectLabels.begin(); iter!= noExistedObjectLabels.end(); ++iter)
-  // {
-  //   LOG(INFO)<<"#####################noExistedObjectLabels:"<<*iter;
-  // }
-  // LOG(INFO)<<"#####################noExistedObjectLabels.size():"<<noExistedObjectLabels.size();
-
-  std::set<std::string> noExistedLabels;
-  for(iter = existedLabels.begin(); iter!= existedLabels.end(); ++iter)
+  LOG(INFO)<<"#####################existingObjectLabels.size():"<<existingObjectLabels.size();
+  for(iter = noExistingObjectLabels.begin(); iter!= noExistingObjectLabels.end(); ++iter)
   {
-    // LOG(INFO)<<"#####################existedLabels:"<<*iter;
+    LOG(INFO)<<"#####################noExistingObjectLabels:"<<*iter;
+  }
+  LOG(INFO)<<"#####################noExistingObjectLabels.size():"<<noExistingObjectLabels.size();
+
+  // noExistingLabels is the no　existing label of  labelmap.prototxt for dataset
+  std::set<std::string> noExistingLabels;
+  for(iter = existingLabels.begin(); iter!= existingLabels.end(); ++iter)
+  {
+    LOG(INFO)<<"#####################existingLabels:"<<*iter;
     if(name_to_label.find(*iter) == name_to_label.end()){
-      noExistedLabels.insert(*iter);
+      noExistingLabels.insert(*iter);
     }
   }
-  // LOG(INFO)<<"#####################existedLabels.size():"<<existedLabels.size();
+  LOG(INFO)<<"#####################existingLabels.size():"<<existingLabels.size();
 
-  // for(iter = noExistedLabels.begin(); iter!= noExistedLabels.end(); ++iter)
-  // {
-  //   LOG(INFO)<<"#####################noExistedLabels:"<<*iter;
-  // }
-  // LOG(INFO)<<"#####################noExistedLabels.size():"<<noExistedLabels.size();
+  for(iter = noExistingLabels.begin(); iter!= noExistingLabels.end(); ++iter)
+  {
+    LOG(INFO)<<"#####################noExistingLabels:"<<*iter;
+  }
+  LOG(INFO)<<"#####################noExistingLabels.size():"<<noExistingLabels.size();
 
   // write the last batch
   if (count % 1000 != 0) {
