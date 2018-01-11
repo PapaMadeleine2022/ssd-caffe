@@ -290,11 +290,11 @@ bool ReadXMLToAnnotatedDatum(const string& labelfile, const int img_height,
         ptree pt2 = v2.second;
         if (v2.first == "name") {
           string name = pt2.data();
+          existingLabels.insert(name);
           if (name_to_label.find(name) == name_to_label.end()) {
             break;
             // LOG(FATAL) << "Unknown name: " << name;
           }
-          existingLabels.insert(name);
           int label = name_to_label.find(name)->second;
           bool found_group = false;
           for (int g = 0; g < anno_datum->annotation_group_size(); ++g) {
