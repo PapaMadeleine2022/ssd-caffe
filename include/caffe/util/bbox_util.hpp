@@ -143,12 +143,6 @@ void MatchBBox(const vector<NormalizedBBox>& gt,
     const bool ignore_cross_boundary_bbox,
     vector<int>* match_indices, vector<float>* match_overlaps);
 
-void MatchBBox_considerIgnore(const vector<NormalizedBBox>& gt_bboxes,
-    const vector<NormalizedBBox>& prior_bboxes_considerIgnore, const int label,
-    const MatchType match_type, const float overlap_threshold,
-    const bool ignore_cross_boundary_bbox,
-    vector<int>* match_indices, vector<float>* match_overlaps);
-
 // Find matches between prediction bboxes and ground truth bboxes.
 //    all_loc_preds: stores the location prediction, where each item contains
 //      location prediction for an image.
@@ -161,14 +155,6 @@ void MatchBBox_considerIgnore(const vector<NormalizedBBox>& gt_bboxes,
 void FindMatches(const vector<LabelBBox>& all_loc_preds,
       const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
       const vector<NormalizedBBox>& prior_bboxes,
-      const vector<vector<float> >& prior_variances,
-      const MultiBoxLossParameter& multibox_loss_param,
-      vector<map<int, vector<float> > >* all_match_overlaps,
-      vector<map<int, vector<int> > >* all_match_indices);
-
-void FindMatches_considerIgnore(const vector<LabelBBox>& all_loc_preds,
-      const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
-      const vector<LabelBBox>& all_prior_bboxes_considerIgnore,
       const vector<vector<float> >& prior_variances,
       const MultiBoxLossParameter& multibox_loss_param,
       vector<map<int, vector<float> > >* all_match_overlaps,
@@ -193,19 +179,8 @@ template <typename Dtype>
 void MineHardExamples(const Blob<Dtype>& conf_blob,
     const vector<LabelBBox>& all_loc_preds,
     const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
+    const map<int, vector<NormalizedBBox> >& all_ignore_bboxes,
     const vector<NormalizedBBox>& prior_bboxes,
-    const vector<vector<float> >& prior_variances,
-    const vector<map<int, vector<float> > >& all_match_overlaps,
-    const MultiBoxLossParameter& multibox_loss_param,
-    int* num_matches, int* num_negs,
-    vector<map<int, vector<int> > >* all_match_indices,
-    vector<vector<int> >* all_neg_indices);
-
-template <typename Dtype>
-void MineHardExamples_considerIgnore(const Blob<Dtype>& conf_blob,
-    const vector<LabelBBox>& all_loc_preds,
-    const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
-    const vector<LabelBBox>& all_prior_bboxes_considerIgnore,
     const vector<vector<float> >& prior_variances,
     const vector<map<int, vector<float> > >& all_match_overlaps,
     const MultiBoxLossParameter& multibox_loss_param,
@@ -224,12 +199,10 @@ template <typename Dtype>
 void GetGroundTruth(const Dtype* gt_data, const int num_gt,
       const int background_label_id, const bool use_difficult_gt,
       map<int, vector<NormalizedBBox> >* all_gt_bboxes);
-
 template <typename Dtype>
 void GetGroundTruth_includeIgnore(const Dtype* gt_data, const int num_gt,
       const int background_label_id, const bool use_difficult_gt,
       map<int, vector<NormalizedBBox> >* all_gt_bboxes, map<int, vector<NormalizedBBox> >* all_ignore_bboxes);
-
 // Store ground truth bboxes of same label in a group.
 template <typename Dtype>
 void GetGroundTruth(const Dtype* gt_data, const int num_gt,
@@ -263,17 +236,9 @@ void GetLocPredictions(const Dtype* loc_data, const int num,
 template <typename Dtype>
 void EncodeLocPrediction(const vector<LabelBBox>& all_loc_preds,
       const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
+      const map<int, vector<NormalizedBBox> >& all_ignore_bboxes,
       const vector<map<int, vector<int> > >& all_match_indices,
       const vector<NormalizedBBox>& prior_bboxes,
-      const vector<vector<float> >& prior_variances,
-      const MultiBoxLossParameter& multibox_loss_param,
-      Dtype* loc_pred_data, Dtype* loc_gt_data);
-
-template <typename Dtype>
-void EncodeLocPrediction_considerIgnore(const vector<LabelBBox>& all_loc_preds,
-      const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
-      const vector<map<int, vector<int> > >& all_match_indices,
-      const vector<LabelBBox>& all_prior_bboxes_considerIgnore,
       const vector<vector<float> >& prior_variances,
       const MultiBoxLossParameter& multibox_loss_param,
       Dtype* loc_pred_data, Dtype* loc_gt_data);
@@ -369,6 +334,8 @@ void EncodeConfPrediction(const Dtype* conf_data, const int num,
       const vector<map<int, vector<int> > >& all_match_indices,
       const vector<vector<int> >& all_neg_indices,
       const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
+      const map<int, vector<NormalizedBBox> >& all_ignore_bboxes,
+      const vector<NormalizedBBox>& prior_bboxes,
       Dtype* conf_pred_data, Dtype* conf_gt_data);
 
 // Get prior bounding boxes from prior_data.
@@ -380,10 +347,6 @@ template <typename Dtype>
 void GetPriorBBoxes(const Dtype* prior_data, const int num_priors,
       vector<NormalizedBBox>* prior_bboxes,
       vector<vector<float> >* prior_variances);
-
-void GetAllPriorBBoxes_considerIgnore(const int& num, const vector<NormalizedBBox>& prior_bboxes,
-                    vector<LabelBBox>& all_prior_bboxes_considerIgnore,
-                    const map<int, vector<NormalizedBBox> >& all_ignore_bboxes);
 
 // Get detection results from det_data.
 //    det_data: 1 x 1 x num_det x 7 blob.
@@ -552,17 +515,7 @@ template <typename Dtype>
       const vector<map<int, vector<int> > >& all_match_indices,
       const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
       vector<vector<float> >* all_conf_loss);
-
-template <typename Dtype>
-void ComputeConfLossGPU_considerIgnore(const Blob<Dtype>& conf_blob, const int num,
-    const int num_preds_per_class, const int num_classes,
-    const int background_label_id, const ConfLossType loss_type,
-    const vector<map<int, vector<int> > >& all_match_indices,
-    const map<int, vector<NormalizedBBox> >& all_gt_bboxes,
-    const vector<LabelBBox>& all_prior_bboxes_considerIgnore,
-    vector<vector<float> >* all_conf_loss);
 #endif  // !CPU_ONLY
-
 
 #ifdef USE_OPENCV
 vector<cv::Scalar> GetColors(const int n);
