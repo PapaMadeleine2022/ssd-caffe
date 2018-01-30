@@ -98,8 +98,13 @@ void ExtrapolateBBox(const ResizeParameter& param, const int height,
 float JaccardOverlap(const NormalizedBBox& bbox1, const NormalizedBBox& bbox2,
                      const bool normalized = true);
 
+// Compute the jaccard (intersection over union IoU) overlap between two bboxes for bbox1.
+float JaccardOverlap_bbox1(const NormalizedBBox& bbox1, const NormalizedBBox& bbox2,
+                    const bool normalized = true);
+
 template <typename Dtype>
 Dtype JaccardOverlap(const Dtype* bbox1, const Dtype* bbox2);
+
 
 // Compute the coverage of bbox1 by bbox2.
 float BBoxCoverage(const NormalizedBBox& bbox1, const NormalizedBBox& bbox2);

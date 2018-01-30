@@ -217,6 +217,10 @@ void LocateBBox(const NormalizedBBox& src_bbox, const NormalizedBBox& bbox,
                 NormalizedBBox* loc_bbox) {
   float src_width = src_bbox.xmax() - src_bbox.xmin();
   float src_height = src_bbox.ymax() - src_bbox.ymin();
+  // LOG(INFO)<<"@@@@@@@@@@@@@@@@@@@@@@loc_bbox->set_xmin():"<<src_bbox.xmin() + bbox.xmin() * src_width;
+  // LOG(INFO)<<"@@@@@@@@@@@@@@@@@@@@@@loc_bbox->set_ymin():"<<src_bbox.ymin() + bbox.ymin() * src_height;
+  // LOG(INFO)<<"@@@@@@@@@@@@@@@@@@@@@@loc_bbox->set_xmax():"<<src_bbox.xmin() + bbox.xmax() * src_width;
+  // LOG(INFO)<<"@@@@@@@@@@@@@@@@@@@@@@loc_bbox->set_ymax():"<<src_bbox.ymin() + bbox.ymax() * src_height;
   loc_bbox->set_xmin(src_bbox.xmin() + bbox.xmin() * src_width);
   loc_bbox->set_ymin(src_bbox.ymin() + bbox.ymin() * src_height);
   loc_bbox->set_xmax(src_bbox.xmin() + bbox.xmax() * src_width);
@@ -293,6 +297,28 @@ float JaccardOverlap(const NormalizedBBox& bbox1, const NormalizedBBox& bbox2,
   }
 }
 
+float JaccardOverlap_bbox1(const NormalizedBBox& bbox1, const NormalizedBBox& bbox2,
+                     const bool normalized) {
+  NormalizedBBox intersect_bbox;
+  IntersectBBox(bbox1, bbox2, &intersect_bbox);
+  float intersect_width, intersect_height;
+  if (normalized) {
+    intersect_width = intersect_bbox.xmax() - intersect_bbox.xmin();
+    intersect_height = intersect_bbox.ymax() - intersect_bbox.ymin();
+  } else {
+    intersect_width = intersect_bbox.xmax() - intersect_bbox.xmin() + 1;
+    intersect_height = intersect_bbox.ymax() - intersect_bbox.ymin() + 1;
+  }
+  if (intersect_width > 0 && intersect_height > 0) {
+    float intersect_size = intersect_width * intersect_height;
+    float bbox1_size = BBoxSize(bbox1);
+    float bbox2_size = BBoxSize(bbox2);
+    return intersect_size / (bbox1_size);
+  } else {
+    return 0.;
+  }
+}
+
 template <typename Dtype>
 Dtype JaccardOverlap(const Dtype* bbox1, const Dtype* bbox2) {
   if (bbox2[0] > bbox1[2] || bbox2[2] < bbox1[0] ||
@@ -314,9 +340,6 @@ Dtype JaccardOverlap(const Dtype* bbox1, const Dtype* bbox2) {
     return inter_size / (bbox1_size + bbox2_size - inter_size);
   }
 }
-
-template float JaccardOverlap(const float* bbox1, const float* bbox2);
-template double JaccardOverlap(const double* bbox1, const double* bbox2);
 
 float BBoxCoverage(const NormalizedBBox& bbox1, const NormalizedBBox& bbox2) {
   NormalizedBBox intersect_bbox;
@@ -1216,9 +1239,9 @@ template void GetLocPredictions(const double* loc_data, const int num,
       const bool share_location, vector<LabelBBox>* loc_preds);
 
 bool cross_IgnoreBboxes(const NormalizedBBox& bbox, const vector<NormalizedBBox>& ignore_bboxes){
-  for(vector<NormalizedBBox>::const_iterator it= ignore_bboxes.begin(); it!= ignore_bboxes.end();++it){
-    float overlap = JaccardOverlap(bbox, *it);
-    if (overlap > 0.7) {
+  for(vector<NormalizedBBox>::const_iterator it= ignore_bboxes.begin(); it!= ignore_bboxes.end(); ++it){
+    float overlap = JaccardOverlap_bbox1(bbox, *it);
+    if (overlap > 0.3) {
       return true;
     }
   }
@@ -1261,14 +1284,14 @@ void EncodeLocPrediction(const vector<LabelBBox>& all_loc_preds,
         // exclude the bbox overlaping any of ignore_bboxes more than overlap threshold(default:0.7)
         if(all_ignore_bboxes.find(i) != all_ignore_bboxes.end()){
           if(cross_IgnoreBboxes(prior_bboxes[j], all_ignore_bboxes.find(i)->second)){
-            loc_gt_data[count * 4]= 0;
-            loc_gt_data[count * 4 + 1]=0;
-            loc_gt_data[count * 4 + 2] =0;
-            loc_gt_data[count * 4 + 3]=0;
-            loc_pred_data[count * 4] = 0;
-            loc_pred_data[count * 4 + 1] = 0;
-            loc_pred_data[count * 4 + 2] = 0;
-            loc_pred_data[count * 4 + 3] = 0;
+            loc_gt_data[count * 4]= 0.;
+            loc_gt_data[count * 4 + 1]=0.;
+            loc_gt_data[count * 4 + 2] =0.;
+            loc_gt_data[count * 4 + 3]=0.;
+            loc_pred_data[count * 4] = 0.;
+            loc_pred_data[count * 4 + 1] = 0.;
+            loc_pred_data[count * 4 + 2] = 0.;
+            loc_pred_data[count * 4 + 3] = 0.;
             ++count;
             continue;
           }
